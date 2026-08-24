@@ -1,0 +1,114 @@
+openapi: 3.0.3
+info:
+  title: Auth Service API
+  version: 1.0.0
+  description: |
+    Serviço de autenticação via CPF/CNPJ.
+    Gera JWT para consumo das APIs protegidas.
+    Responsabilidades:
+    - Validar CPF/CNPJ do cliente
+    - Consultar existência do cliente na base
+    - Validar status do cliente (ativo/inativo)
+    - Gerar token JWT
+    - Retornar token válido
+servers:
+  - url: https://{stage}.api.oficina.example.com/auth
+    variables:
+      stage:
+        enum: [homolog, production]
+        default: homolog
+        description: Ambiente de deploy
+paths:
+  /token:
+    post:
+      summary: Gerar token JWT via CPF/CNPJ
+      operationId: generateToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRequest'
+      responses:
+        '200':
+          description: Token gerado com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          description: CPF/CNPJ inválido ou mal formatado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Cliente não encontrado ou inativo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limit excedido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Erro interno do servidor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  schemas:
+    TokenRequest:
+      type: object
+      required:
+        - cpf_cnpj
+      properties:
+        cpf_cnpj:
+          type: string
+          pattern: '^\d{11,14}$'
+          description: CPF (11 dígitos) ou CNPJ (14 dígitos) sem formatação
+          example: "12345678901"
+    TokenResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          description: JWT Bearer token
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        token_type:
+          type: string
+          enum: [Bearer]
+          example: "Bearer"
+        expires_in:
+          type: integer
+          description: Tempo de expiração em segundos
+          example: 3600
+        refresh_token:
+          type: string
+          description: Token para renovação (opcional)
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+    ErrorResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+        error:
+          type: string
+        message:
+          type: string
+        path:
+          type: string
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+security:
+  - BearerAuth: []

@@ -1,0 +1,269 @@
+openapi: 3.0.3
+info:
+  title: Video Service API
+  version: 1.0.0
+  description: |
+    Serviço de gerenciamento e processamento de vídeos.
+    Responsabilidades:
+    - Upload de vídeos (presigned URL)
+    - Status de processamento
+    - Metadados de vídeo
+    - Eventos assíncronos via message broker
+servers:
+  - url: https://{stage}.api.oficina.example.com/video
+    variables:
+      stage:
+        enum: [homolog, production]
+        default: homolog
+        description: Ambiente de deploy
+paths:
+  /videos:
+    post:
+      summary: Iniciar upload de vídeo (retorna presigned URL)
+      operationId: initiateUpload
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VideoUploadInitiateRequest'
+      responses:
+        '201':
+          description: Upload iniciado, presigned URL retornada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoUploadInitiateResponse'
+        '400':
+          description: Requisição inválida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Token inválido ou expirado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          description: Arquivo excede tamanho máximo permitido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    get:
+      summary: Listar vídeos do usuário
+      operationId: listVideos
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [UPLOADED, PROCESSING, PROCESSED, FAILED]
+      responses:
+        '200':
+          description: Lista paginada de vídeos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoListResponse'
+  /videos/{videoId}:
+    get:
+      summary: Obter detalhes de um vídeo
+      operationId: getVideo
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: videoId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Detalhes do vídeo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoResponse'
+        '404':
+          description: Vídeo não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /videos/{videoId}/status:
+    get:
+      summary: Consultar status de processamento
+      operationId: getVideoStatus
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: videoId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Status atual do processamento
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoStatusResponse'
+components:
+  schemas:
+    VideoUploadInitiateRequest:
+      type: object
+      required:
+        - filename
+        - content_type
+        - size_bytes
+      properties:
+        filename:
+          type: string
+          maxLength: 255
+          example: "aula-01.mp4"
+        content_type:
+          type: string
+          enum: [video/mp4, video/quicktime, video/x-msvideo, video/x-matroska]
+          example: "video/mp4"
+        size_bytes:
+          type: integer
+          minimum: 1
+          maximum: 5368709120
+          description: Tamanho máximo 5GB
+          example: 104857600
+    VideoUploadInitiateResponse:
+      type: object
+      properties:
+        video_id:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        upload_url:
+          type: string
+          format: uri
+          description: Presigned PUT URL para upload direto ao bucket
+          example: "https://oficina-videos-homolog.s3.amazonaws.com/uploads/550e8400-e29b-41d4-a716-446655440000/aula-01.mp4?X-Amz-Algorithm=..."
+        expires_in:
+          type: integer
+          description: Validade da URL em segundos
+          example: 3600
+        headers:
+          type: object
+          description: Headers obrigatórios no PUT (ex: Content-Type)
+          example:
+            Content-Type: "video/mp4"
+    VideoResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        filename:
+          type: string
+        content_type:
+          type: string
+        size_bytes:
+          type: integer
+        status:
+          type: string
+          enum: [UPLOADED, PROCESSING, PROCESSED, FAILED]
+        duration_seconds:
+          type: integer
+          nullable: true
+        width:
+          type: integer
+          nullable: true
+        height:
+          type: integer
+          nullable: true
+        thumbnail_url:
+          type: string
+          format: uri
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        processed_at:
+          type: string
+          format: date-time
+          nullable: true
+        error_message:
+          type: string
+          nullable: true
+    VideoStatusResponse:
+      type: object
+      properties:
+        video_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [UPLOADED, PROCESSING, PROCESSED, FAILED]
+        progress_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+    VideoListResponse:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/VideoResponse'
+        page:
+          type: integer
+        size:
+          type: integer
+        total_elements:
+          type: integer
+        total_pages:
+          type: integer
+    ErrorResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+        error:
+          type: string
+        message:
+          type: string
+        path:
+          type: string
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

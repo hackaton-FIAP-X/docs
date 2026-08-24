@@ -1,0 +1,54 @@
+{
+  "event": "video.processed",
+  "event_id": "evt_550e8400-e29b-41d4-a716-446655440001",
+  "event_version": "1.0",
+  "timestamp": "2026-08-24T15:35:22.000Z",
+  "source": "video-processor",
+  "data": {
+    "video_id": "550e8400-e29b-41d4-a716-446655440000",
+    "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "status": "PROCESSED",
+    "duration_seconds": 1845,
+    "width": 1920,
+    "height": 1080,
+    "bitrate_kbps": 5000,
+    "codec": "h264",
+    "outputs": [
+      {
+        "profile": "original",
+        "bucket": "oficina-videos-homolog",
+        "object_key": "processed/550e8400-e29b-41d4-a716-446655440000/aula-01.mp4",
+        "size_bytes": 98765432
+      },
+      {
+        "profile": "720p",
+        "bucket": "oficina-videos-homolog",
+        "object_key": "processed/550e8400-e29b-41d4-a716-446655440000/aula-01_720p.mp4",
+        "size_bytes": 45678901,
+        "width": 1280,
+        "height": 720
+      },
+      {
+        "profile": "480p",
+        "bucket": "oficina-videos-homolog",
+        "object_key": "processed/550e8400-e29b-41d4-a716-446655440000/aula-01_480p.mp4",
+        "size_bytes": 23456789,
+        "width": 854,
+        "height": 480
+      },
+      {
+        "profile": "thumbnail",
+        "bucket": "oficina-videos-homolog",
+        "object_key": "thumbnails/550e8400-e29b-41d4-a716-446655440000/thumb_0001.jpg",
+        "size_bytes": 123456,
+        "width": 320,
+        "height": 180
+      }
+    ],
+    "processing_time_seconds": 322
+  },
+  "metadata": {
+    "correlation_id": "corr_550e8400-e29b-41d4-a716-446655440000",
+    "causation_id": "evt_550e8400-e29b-41d4-a716-446655440000"
+  }
+}

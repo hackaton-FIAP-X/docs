@@ -1,0 +1,28 @@
+{
+  "event": "video.failed",
+  "event_id": "evt_550e8400-e29b-41d4-a716-446655440002",
+  "event_version": "1.0",
+  "timestamp": "2026-08-24T15:33:10.000Z",
+  "source": "video-processor",
+  "data": {
+    "video_id": "550e8400-e29b-41d4-a716-446655440000",
+    "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "status": "FAILED",
+    "error": {
+      "code": "PROCESSING_TIMEOUT",
+      "message": "Video processing exceeded maximum allowed time (30 minutes)",
+      "details": {
+        "stage": "transcoding_720p",
+        "elapsed_seconds": 1800,
+        "max_allowed_seconds": 1800
+      }
+    },
+    "retryable": true,
+    "retry_count": 0,
+    "max_retries": 3
+  },
+  "metadata": {
+    "correlation_id": "corr_550e8400-e29b-41d4-a716-446655440000",
+    "causation_id": "evt_550e8400-e29b-41d4-a716-446655440000"
+  }
+}
