@@ -1,6 +1,6 @@
 # Bucket Key Layout Specification
 
-## Versão: 1.0
+## Versão: 1.1
 ## Compatível com: video-service v1, video-processor v1
 
 ---
@@ -9,10 +9,30 @@
 
 | Ambiente | Bucket Original | Bucket Processado | Região |
 |----------|-----------------|-------------------|--------|
+| Local (kind) | `fiapx-videos` | `fiapx-outputs` | — (MinIO) |
 | Homologação | `oficina-videos-homolog` | `oficina-videos-homolog` | `us-east-1` |
 | Produção | `oficina-videos-prod` | `oficina-videos-prod` | `us-east-1` |
 
-> **Nota**: Mesmo bucket para original e processado, pastas diferentes.
+> **Nota**: em homolog/prod, mesmo bucket para original e processado (pastas diferentes).
+
+---
+
+## Local (kind) — ver [ADR-001](../../adr/ADR-001-stack-local-kind-rabbitmq-minio.md)
+
+No ambiente local o object storage é **MinIO** (API compatível com S3), não AWS S3.
+
+| Item | Valor local |
+|------|-------------|
+| Endpoint | `http://minio.fiapx.svc.cluster.local:9000` (via `MINIO_ENDPOINT`) |
+| Console | `http://localhost:9001` (após `kubectl -n fiapx port-forward svc/minio 9001:9001`) |
+| Credenciais | Secret `app-credentials`: `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` |
+| Bucket original | `fiapx-videos` (chaves `uploads/{video_id}/{filename}`, `tmp/{video_id}/...`) |
+| Bucket de saída | `fiapx-outputs` (chaves `processed/{video_id}/...`, `thumbnails/{video_id}/...`) |
+| Criação dos buckets | Job `minio-createbuckets` (`k8s/infra/base/minio/job-createbuckets.yaml` no repo `infra`) |
+
+O **layout de chaves, regras de naming e TTLs abaixo continuam valendo** — só o
+provedor muda. Presigned URLs são geradas pelo SDK AWS S3 v2 apontando para o
+endpoint do MinIO. Lifecycle policies (IA/Glacier) não se aplicam ao MinIO local.
 
 ---
 
@@ -177,11 +197,12 @@ tmp/550e8400-e29b-41d4-a716-446655440000/abc123/aula-01.mp4
 
 ---
 
-## Eventos de Storage (S3 Event Notifications)
+## Eventos de Storage
 
-| Evento | Prefixo | Destino |
-|--------|---------|---------|
-| `s3:ObjectCreated:*` | `uploads/` | SQS `video-uploaded-queue` |
-| `s3:ObjectCreated:*` | `processed/` | SQS `video-processed-queue` (opcional) |
+| Ambiente | Como o `video.uploaded` é gerado | Transporte |
+|----------|--------------------------------|------------|
+| Local (kind) | **`video-service` publica** o evento após concluir o upload | fila **RabbitMQ** (`video.uploaded`) |
+| AWS (homolog/prod) | S3 Event Notification em `s3:ObjectCreated:*` no prefixo `uploads/` | SQS `video-uploaded-queue` |
 
-> O `video-processed` event é emitido pelo processor, não pelo S3.
+> `video.processed` / `video.failed` são sempre emitidos pelo `video-processor`
+> (nunca pelo storage). Payloads em `../events/*.json`.

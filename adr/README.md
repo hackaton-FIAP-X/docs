@@ -15,9 +15,7 @@ Registro de decisões arquiteturais significativas do projeto.
 
 | ID | Título | Status | Data | Autor |
 |----|--------|--------|------|-------|
-| 001 | [Exemplo: Arquitetura Microserviços](001-microservices-architecture.md) | Aceito | 2024-01-15 | @autor |
-| 002 | [Exemplo: PostgreSQL por Serviço](002-postgres-per-service.md) | Aceito | 2024-01-15 | @autor |
-| 003 | [Exemplo: Kafka para Processamento Assíncrono](003-adota-kafka-processamento-video.md) | Proposto | 2024-01-20 | @autor |
+| 001 | [Stack local do hackathon — kind + RabbitMQ + MinIO + PostgreSQL + Redis](ADR-001-stack-local-kind-rabbitmq-minio.md) | Aceito | 2026-09-01 | @denisrodrigues |
 
 > **Dica**: Mantenha esta tabela atualizada. Script sugerido para gerar automaticamente:
 > ```bash

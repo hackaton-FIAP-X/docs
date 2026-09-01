@@ -1,15 +1,21 @@
-# Contratos de Integração — Tech Challenge Fase 3
+# Contratos de Integração — FIAP X (Hackathon Fase 5)
 
 ## Visão Geral
 
-Este diretório contém os contratos congelados que permitem as **4 trilhas rodarem em paralelo**:
+Este diretório contém os contratos congelados que permitem os serviços evoluírem em paralelo.
 
-| Trilha | Repositório | Contratos Consumidos |
-|--------|-------------|---------------------|
-| 1. Auth Lambda | `auth-lambda` | `openapi/auth-service-v1.yaml`, `jwt/claims.md`, `ddl/users.sql` |
-| 2. Infra K8s | `infra-k8s-terraform` | `openapi/*.yaml` (para API Gateway routes) |
-| 3. Infra DB | `infra-db-terraform` | `ddl/users.sql`, `ddl/videos.sql` |
-| 4. App Principal | `app-main-k8s` | `openapi/video-service-v1.yaml`, `events/*.json`, `jwt/claims.md`, `storage/bucket-layout.md` |
+> **Substrato**: estes contratos foram escritos na Fase 3 assumindo AWS (S3, SQS,
+> API Gateway, Lambda). Para o alvo local/hackathon vale a **[ADR-001](../adr/ADR-001-stack-local-kind-rabbitmq-minio.md)**:
+> **kind + RabbitMQ + MinIO + PostgreSQL + Redis**. Os *schemas* (evento, DDL,
+> claims, layout de chaves) continuam valendo; onde se lê "S3" leia "MinIO" e
+> onde se lê "SQS `video-*-queue`" leia "fila RabbitMQ".
+
+| Repositório | Papel | Contratos Consumidos |
+|-------------|-------|---------------------|
+| `auth-service` | Autenticação, emissão de JWT | `openapi/auth-service-v1.yaml`, `jwt/claims.md`, `ddl/users.sql` |
+| `video-service` | Upload, metadados, status, publicação de eventos | `openapi/video-service-v1.yaml`, `events/*.json`, `jwt/claims.md`, `storage/bucket-layout.md` |
+| `video-processor` | Worker de processamento (frames → `.zip`), consumo/publicação de eventos | `events/*.json`, `storage/bucket-layout.md` |
+| `infra` | Cluster kind, manifests K8s, infra de apoio | `openapi/*.yaml`, `ddl/*.sql` |
 
 ---
 
@@ -42,11 +48,11 @@ docs/contracts/
 ### Fluxo de Mudança
 
 1. **Propor mudança**: Abrir issue/discord com `[CONTRACT CHANGE]` no título
-2. **Discutir**: Alinhar impacto nas 4 trilhas (breaking vs non-breaking)
+2. **Discutir**: Alinhar impacto nos serviços (breaking vs non-breaking)
 3. **Implementar**: Atualizar arquivos em `docs/contracts/` + código afetado
 4. **PR único**: Mesmo PR deve conter:
    - Mudança no contrato (`docs/contracts/...`)
-   - Mudança no consumidor (ex: `auth-lambda`, `video-service`, etc.)
+   - Mudança no consumidor (ex: `auth-service`, `video-service`, `video-processor`)
    - Testes de contrato atualizados
 5. **Aprovação**: Mínimo 2 aprovações (incluindo tech lead da trilha impactada)
 6. **Deploy**: Merge → CI roda validação de contrato → Deploy coordenado
@@ -74,7 +80,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate OpenAPI
         run: |
-          # auth-lambda valida auth-service-v1.yaml
+          # auth-service valida auth-service-v1.yaml
           # video-service valida video-service-v1.yaml
           swagger-codegen validate -i docs/contracts/openapi/auth-service-v1.yaml
       - name: Validate Events Schema
@@ -89,43 +95,35 @@ jobs:
 
 ---
 
-## Como Usar nas Trilhas
+## Como Usar nos Serviços
 
-### Auth Lambda (`auth-lambda`)
-```bash
-# Gerar cliente a partir do OpenAPI
-swagger-codegen generate -i docs/contracts/openapi/auth-service-v1.yaml -l kotlin-spring -o src/main/kotlin
-# Implementar handler POST /token seguindo TokenRequest/TokenResponse
-# Emitir JWT com claims de docs/contracts/jwt/claims.md
+Stack real: Spring Boot 3.3 / Java 21 / Maven. Ver [ADR-001](../adr/ADR-001-stack-local-kind-rabbitmq-minio.md).
+
+### `auth-service`
+```
+# Implementar POST /token seguindo TokenRequest / TokenResponse (openapi/auth-service-v1.yaml)
+# Emitir JWT com os claims de jwt/claims.md (assinatura HMAC via JWT_SECRET)
+# Tabela users conforme ddl/users.sql
 ```
 
-### Video Service (`app-main-k8s` → video module)
-```bash
-# Gerar interfaces Spring
-swagger-codegen generate -i docs/contracts/openapi/video-service-v1.yaml -l spring-mvc -o src/main/java
-# Implementar VideoController
-# Publicar eventos Kafka/RabbitMQ seguindo docs/contracts/events/*.json
-# Usar docs/contracts/storage/bucket-layout.md para presigned URLs e caminhos
+### `video-service`
+```
+# Implementar os endpoints de video-service-v1.yaml (upload, listagem, status)
+# Publicar video.uploaded no RabbitMQ seguindo events/video.uploaded.json
+# Consumir video.processed / video.failed
+# Usar storage/bucket-layout.md para as chaves no MinIO (uploads/{video_id}/...)
 ```
 
-### Infra DB (`infra-db-terraform`)
-```hcl
-# Aplicar migrations baseadas em docs/contracts/ddl/*.sql
-resource "aws_db_instance" "main" {
-  # ...
-}
-
-# Flyway/Liquibase usa os .sql como baseline
+### `video-processor`
+```
+# Consumir video.uploaded; baixar do MinIO; extrair frames (FFmpeg -vf fps=1); empacotar .zip
+# Publicar video.processed / video.failed seguindo events/*.json
 ```
 
-### Infra K8s (`infra-k8s-terraform`)
-```hcl
-# API Gateway routes baseados nos paths do OpenAPI
-resource "aws_apigatewayv2_route" "auth_token" {
-  api_id    = aws_apigatewayv2_api.main.id
-  route_key = "POST /auth/token"
-  target    = "integrations/${aws_apigatewayv2_integration.auth_lambda.id}"
-}
+### `infra`
+```
+# DDL de ddl/*.sql vira migration Flyway em cada serviço
+# Manifests K8s (namespace fiapx) + cluster kind — ver o repo infra/
 ```
 
 ---
@@ -148,8 +146,9 @@ resource "aws_apigatewayv2_route" "auth_token" {
 | Versão | Data | Autor | Mudança |
 |--------|------|-------|---------|
 | 1.0.0 | 2026-08-24 | @author | Criação inicial (congelamento Fase 3) |
+| 1.1.0 | 2026-09-01 | @denisrodrigues | Substrato local (ADR-001): AWS S3/SQS → MinIO/RabbitMQ; mapa de repositórios atualizado |
 
 ---
 
-**Última atualização**: 2026-08-24  
-**Status**: 🟢 **CONGELADO** — Pronto para desenvolvimento paralelo das 4 trilhas
+**Última atualização**: 2026-09-01  
+**Status**: 🟢 **CONGELADO** (schemas) — substrato local por [ADR-001](../adr/ADR-001-stack-local-kind-rabbitmq-minio.md)
