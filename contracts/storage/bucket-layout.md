@@ -1,38 +1,55 @@
 # Bucket Key Layout Specification
 
-## Versão: 1.1
+## Versão: 1.2
 ## Compatível com: video-service v1, video-processor v1
 
 ---
 
 ## Buckets por Ambiente
 
-| Ambiente | Bucket Original | Bucket Processado | Região |
-|----------|-----------------|-------------------|--------|
-| Local (kind) | `fiapx-videos` | `fiapx-outputs` | — (MinIO) |
-| Homologação | `oficina-videos-homolog` | `oficina-videos-homolog` | `us-east-1` |
-| Produção | `oficina-videos-prod` | `oficina-videos-prod` | `us-east-1` |
-
-> **Nota**: em homolog/prod, mesmo bucket para original e processado (pastas diferentes).
+| Ambiente | Bucket | Região |
+|----------|--------|--------|
+| **Local (kind / compose)** | **`fiapx`** — prefixos `inputs/` e `outputs/` | — (MinIO) |
+| Homologação *(não implementado)* | `oficina-videos-homolog` | `us-east-1` |
+| Produção *(não implementado)* | `oficina-videos-prod` | `us-east-1` |
 
 ---
 
-## Local (kind) — ver [ADR-001](../../adr/ADR-001-stack-local-kind-rabbitmq-minio.md)
+## ⚠️ Layout implementado (vale sobre o resto deste documento)
 
-No ambiente local o object storage é **MinIO** (API compatível com S3), não AWS S3.
+Ver [ADR-001](../../adr/ADR-001-stack-local-kind-rabbitmq-minio.md). O fluxo
+entregue é **vídeo → frames → `.zip`**, escopado **por usuário**, não o
+transcoding multi-perfil por `video_id` descrito nas seções seguintes.
 
-| Item | Valor local |
-|------|-------------|
-| Endpoint | `http://minio.fiapx.svc.cluster.local:9000` (via `MINIO_ENDPOINT`) |
-| Console | `http://localhost:9001` (após `kubectl -n fiapx port-forward svc/minio 9001:9001`) |
-| Credenciais | Secret `app-credentials`: `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` |
-| Bucket original | `fiapx-videos` (chaves `uploads/{video_id}/{filename}`, `tmp/{video_id}/...`) |
-| Bucket de saída | `fiapx-outputs` (chaves `processed/{video_id}/...`, `thumbnails/{video_id}/...`) |
-| Criação dos buckets | Job `minio-createbuckets` (`k8s/infra/base/minio/job-createbuckets.yaml` no repo `infra`) |
+| Item | Valor |
+|------|-------|
+| Provedor | **MinIO** (API compatível com S3), não AWS S3 |
+| Endpoint | `http://minio.fiapx.svc.cluster.local:9000` (via `STORAGE_ENDPOINT`) |
+| Console | `http://localhost:9001` (`kubectl -n fiapx port-forward svc/minio 9001:9001`) |
+| Credenciais | Secret `app-credentials`: `STORAGE_ACCESS_KEY` / `STORAGE_SECRET_KEY` |
+| Bucket | **`fiapx`** — um só, com prefixos (`STORAGE_BUCKET`) |
+| Criação | Job `minio-createbuckets` no repo `infra` |
 
-O **layout de chaves, regras de naming e TTLs abaixo continuam valendo** — só o
-provedor muda. Presigned URLs são geradas pelo SDK AWS S3 v2 apontando para o
-endpoint do MinIO. Lifecycle policies (IA/Glacier) não se aplicam ao MinIO local.
+### Chaves
+
+```
+fiapx/inputs/{userId}/{videoId}/{originalFilename}    # vídeo original (VID-3)
+fiapx/outputs/{userId}/{videoId}.zip                  # ZIP de frames (WRK-4)
+```
+
+Fonte de verdade: os comentários de `storage_key` e `zip_key` em
+`video-service/src/main/resources/db/migration/V1__criar_tabela_videos.sql`.
+
+Presigned URLs são geradas pelo SDK AWS S3 v2 apontando para o MinIO
+(download com TTL de 5 minutos — VID-6). Lifecycle policies (IA/Glacier) não se
+aplicam ao MinIO local.
+
+---
+
+> **As seções abaixo são o contrato original da Fase 3** (domínio "oficina",
+> AWS S3, transcoding multi-perfil, chaves por `video_id`). Ficam registradas
+> como histórico e como referência caso o projeto volte para um provedor
+> gerenciado — **não descrevem o que está implementado**.
 
 ---
 

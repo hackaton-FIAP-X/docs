@@ -51,18 +51,28 @@ Adotamos, para o alvo local e de demonstração do hackathon:
 |---|---|
 | Orquestração | **kind** (Kubernetes-in-Docker), 1 control-plane + 2 workers |
 | Mensageria | **RabbitMQ** (`spring-boot-starter-amqp`) |
-| Object storage | **MinIO** (API compatível com S3; SDK AWS S3 v2 aponta para o endpoint do MinIO) |
+| Object storage | **MinIO** (API compatível com S3; SDK AWS S3 v2 aponta para o endpoint do MinIO). Bucket único `fiapx`, prefixos `inputs/` e `outputs/` |
 | Banco | **PostgreSQL** (um database por serviço: `authdb`, `videodb`) |
 | Cache / contadores | **Redis** |
 | E-mail (dev) | **Mailhog** |
 | Fluxo de processamento | vídeo → **extração de frames (FFmpeg `-vf fps=1`)** → **`.zip`** no object storage |
-| Assinatura de JWT | segredo **simétrico** (HMAC), via `JWT_SECRET` (par assimétrico/JWKS fica como evolução) |
+| Assinatura de JWT | par **assimétrico** publicado via **JWKS**; o `video-service` valida offline pela `JWT_JWKS_URI`, issuer `fiapx-auth` |
 
 O `docs/contracts/` continua sendo a referência de **forma** (schemas de evento,
-DDL, claims do JWT, layout de chaves de bucket). O que muda é o **substrato**:
-onde os contratos dizem "S3" leia "MinIO"; onde dizem "SQS `video-uploaded-queue`"
-leia "fila RabbitMQ"; o layout de chaves (`uploads/{video_id}/…`,
-`processed/{video_id}/…`) é mantido.
+claims do JWT). O que muda é o **substrato**: onde os contratos dizem "S3" leia
+"MinIO"; onde dizem "SQS `video-uploaded-queue`" leia "fila RabbitMQ".
+
+O **layout de chaves não foi mantido**: o fluxo frames→ZIP é escopado por usuário,
+não por vídeo. O que vale é o implementado na VID-3/VID-6 e documentado nas
+migrations:
+
+```
+fiapx/inputs/{userId}/{videoId}/{originalFilename}
+fiapx/outputs/{userId}/{videoId}.zip
+```
+
+O DDL dos contratos também foi superado pelas migrations Flyway — a fonte de
+verdade do schema é `docs/database/` (ver o README de lá).
 
 Esta ADR **substitui a premissa AWS S3/SQS/API-Gateway** dos contratos congelados
 para o alvo local/hackathon. Um provedor gerenciado em nuvem pode voltar numa
@@ -86,8 +96,8 @@ ADR futura sem invalidar os schemas.
   (fila de trabalho com DLQ), mas limita casos de event-sourcing futuros.
 - ❌ `kind delete cluster` apaga os PVCs; não há persistência entre recriações
   do cluster.
-- ❌ JWT simétrico exige compartilhar `JWT_SECRET` entre auth e serviços
-  validadores (sem validação offline por chave pública).
+- ❌ A JWKS acopla o `video-service` à disponibilidade do `auth-service` no
+  primeiro fetch das chaves (mitigado pelo cache do resource server).
 
 ### Neutras / Trade-offs
 - ⚖️ kind aproxima a demo de um Kubernetes real, ao custo de mais recurso de
@@ -114,17 +124,22 @@ ADR futura sem invalidar os schemas.
 1. [x] Criar o repositório `infra/` (polyrepo, ao lado de auth/video/processor/docs).
 2. [x] `kind/kind-config.yaml` — 1 control-plane + 2 workers.
 3. [x] **PLT-2**: manifests de Postgres, RabbitMQ, MinIO, Redis (StatefulSet +
-   PVC) e Mailhog (Deployment), no namespace `fiapx`, com Job de criação dos
-   buckets `fiapx-videos` / `fiapx-outputs`.
+   PVC) e Mailhog (Deployment), no namespace `fiapx`, com Job de criação do
+   bucket `fiapx`.
 4. [x] **PLT-1**: Deployment + Service + ConfigMap + Secret (via `secretGenerator`)
    para os três serviços, com probes no Actuator.
 5. [x] Scripts `kind-up` / `build-images` / `load-images` / `deploy-infra` /
    `deploy-apps` / `verify` / `down`.
 6. [x] Atualizar `docs/contracts/README.md` e `docs/contracts/storage/bucket-layout.md`
    (substrato local) e o `README.md` da raiz.
-7. [ ] PLT-3: Ingress NGINX + HPA do worker.
-8. [ ] PLT-4: `docker-compose` completo + Makefile.
-9. [ ] PLT-7: Prometheus + Grafana.
+7. [x] **PLT-3**: Ingress NGINX + HPA do worker (2–10 réplicas, 70% CPU) + metrics-server.
+8. [x] **PLT-4**: `docker-compose` completo + Makefile.
+9. [x] **PLT-5**: CI em todos os repositórios.
+10. [x] **PLT-7**: Prometheus + Grafana com dashboard versionado.
+11. [x] **PLT-9**: `docs/database/schema.sql` gerado a partir das migrations.
+12. [ ] PLT-6: CD com push no GHCR e deploy em kind efêmero.
+13. [ ] PLT-8: notificação por e-mail no consumer de `video.failed`.
+14. [ ] PLT-10: teste de carga com k6.
 
 ---
 
@@ -167,3 +182,4 @@ ADR futura sem invalidar os schemas.
 | Data | Versão | Autor | Mudança |
 |---|---|---|---|
 | 2026-09-01 | 1.0 | @denisrodrigues | Criação inicial — stack local kind/RabbitMQ/MinIO/Postgres/Redis (PLT-1, PLT-2) |
+| 2026-09-08 | 1.1 | @denisrodrigues | Alinha a ADR ao que a trilha B implementou: JWT assimétrico via JWKS (VID-2) em vez de HMAC, e bucket único `fiapx` com prefixos `inputs/`/`outputs/` |

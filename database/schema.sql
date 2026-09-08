@@ -2,28 +2,27 @@
 -- FIAP X - Sistema de Processamento de Videos
 -- Script consolidado de criacao do banco de dados  (PLT-9)
 --
--- Entregavel obrigatorio do enunciado: "Script de criacao do banco de dados ou
--- de outros recursos utilizados."
+-- ARQUIVO GERADO — nao edite a mao.
+-- Regerar:  ./docs/database/generate-schema.sh
+-- Fonte de verdade: as migrations Flyway de cada servico.
 --
--- Fonte: docs/contracts/ddl/users.sql + docs/contracts/ddl/videos.sql
--- Substrato: PostgreSQL 16 (ver docs/adr/ADR-001-stack-local-kind-rabbitmq-minio.md)
+-- Gerado a partir de:
+--   auth-service/src/main/resources/db/migration/V1__create_users_table.sql
+--   video-service/src/main/resources/db/migration/V1__criar_tabela_videos.sql
+--   video-service/src/main/resources/db/migration/V2__criar_tabela_outbox_events.sql
 --
--- COMO RODAR (base vazia):
---     psql -U <user> -h <host> -f docs/database/schema.sql
+-- Substrato: PostgreSQL 16 (docs/adr/ADR-001-stack-local-kind-rabbitmq-minio.md)
 --
--- No cluster kind, os dois databases ja sao criados pelo initdb do Postgres
--- (infra/k8s/infra/base/postgres/configmap.yaml). Rodando este script inteiro
--- em uma instancia limpa, os CREATE DATABASE abaixo cuidam disso.
---
--- NOTA SOBRE FLYWAY: quando AUTH-1 e VID-1 introduzirem as migrations Flyway,
--- este arquivo deve ser regerado a partir delas para nao divergir.
+-- COMO RODAR (instancia limpa):
+--   psql -v ON_ERROR_STOP=1 -U <user> -h <host> -d postgres -f docs/database/schema.sql
 -- =============================================================================
 
 
 -- =============================================================================
--- DATABASES  (um por servico)
+-- DATABASES (um por servico, sem foreign key entre eles)
 -- =============================================================================
--- Comente estas duas linhas se os databases ja existirem (caso do kind).
+-- Comente as duas linhas se os databases ja existirem (caso do cluster kind,
+-- onde o initdb do Postgres ja os cria).
 CREATE DATABASE authdb;
 CREATE DATABASE videodb;
 
@@ -33,116 +32,81 @@ CREATE DATABASE videodb;
 -- =============================================================================
 \connect authdb
 
+-- ---- V1__create_users_table.sql ----
 CREATE TABLE users (
-    id UUID PRIMARY KEY,
-    nome VARCHAR(200) NOT NULL,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    senha VARCHAR(255) NOT NULL,
-    role VARCHAR(50) NOT NULL CHECK (role IN ('ADMIN', 'GERENTE', 'MECANICO', 'ATENDENTE', 'CLIENTE')),
-    ativo BOOLEAN NOT NULL DEFAULT TRUE,
-    data_cadastro TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    data_atualizacao TIMESTAMP
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    role VARCHAR(50) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uk_users_email UNIQUE (email)
 );
-
-CREATE INDEX idx_users_email ON users(email);
-CREATE INDEX idx_users_role ON users(role);
-CREATE INDEX idx_users_ativo ON users(ativo);
-
-COMMENT ON TABLE users IS 'Usuarios do sistema (internos e clientes)';
-COMMENT ON COLUMN users.id IS 'Identificador unico (UUID v4)';
-COMMENT ON COLUMN users.nome IS 'Nome completo do usuario';
-COMMENT ON COLUMN users.email IS 'Email unico, usado como login';
-COMMENT ON COLUMN users.senha IS 'Hash bcrypt da senha';
-COMMENT ON COLUMN users.role IS 'Perfil de acesso: ADMIN, GERENTE, MECANICO, ATENDENTE, CLIENTE';
-COMMENT ON COLUMN users.ativo IS 'Se o usuario pode autenticar';
-COMMENT ON COLUMN users.data_cadastro IS 'Data de criacao do registro';
-COMMENT ON COLUMN users.data_atualizacao IS 'Data da ultima atualizacao';
-
 
 -- =============================================================================
 -- 2) videodb  -  video-service / video-processor
+--
+-- `videos.user_id` guarda o claim `sub` do JWT e NAO tem foreign key para
+-- users: a tabela vive em outro database e o PostgreSQL nao faz FK entre
+-- bases. Numa fronteira de microsservico a integridade vem do token e dos
+-- eventos, nao do banco.
 -- =============================================================================
 \connect videodb
 
--- ATENCAO - divergencia deliberada em relacao a docs/contracts/ddl/videos.sql:
--- o contrato declara  CONSTRAINT fk_videos_user FOREIGN KEY (user_id)
--- REFERENCES users(id).  Isso e impossivel aqui porque `users` vive em outro
--- database (authdb) e o PostgreSQL nao suporta foreign key entre databases.
--- Manter `user_id` como UUID sem FK e o comportamento correto para uma
--- fronteira de microsservico: a integridade referencial entre servicos e
--- garantida pelo token (claim `sub`) e pelos eventos, nao pelo banco.
+-- ---- V1__criar_tabela_videos.sql ----
 CREATE TABLE videos (
     id UUID PRIMARY KEY,
     user_id UUID NOT NULL,
-    filename VARCHAR(255) NOT NULL,
-    content_type VARCHAR(100) NOT NULL CHECK (content_type IN ('video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska')),
-    size_bytes BIGINT NOT NULL CHECK (size_bytes > 0 AND size_bytes <= 5368709120),
-    status VARCHAR(20) NOT NULL DEFAULT 'UPLOADED' CHECK (status IN ('UPLOADED', 'PROCESSING', 'PROCESSED', 'FAILED')),
-    duration_seconds INTEGER,
-    width INTEGER,
-    height INTEGER,
-    bitrate_kbps INTEGER,
-    codec VARCHAR(50),
-    thumbnail_url VARCHAR(500),
-    bucket VARCHAR(100) NOT NULL,
-    object_key VARCHAR(500) NOT NULL,
-    checksum_sha256 CHAR(64),
-    error_code VARCHAR(50),
-    error_message TEXT,
-    retry_count INTEGER NOT NULL DEFAULT 0,
-    max_retries INTEGER NOT NULL DEFAULT 3,
+    original_filename VARCHAR(255) NOT NULL,
+    storage_key VARCHAR(512) NOT NULL,
+    zip_key VARCHAR(512),
+    status VARCHAR(20) NOT NULL,
+    frame_count INTEGER,
+    error_message VARCHAR(1000),
+    attempts INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    processed_at TIMESTAMP
+    updated_at TIMESTAMP,
+    CONSTRAINT chk_videos_status CHECK (
+        status IN ('RECEIVED', 'QUEUED', 'PROCESSING', 'COMPLETED', 'FAILED')
+    ),
+    CONSTRAINT chk_videos_frame_count CHECK (frame_count IS NULL OR frame_count >= 0),
+    CONSTRAINT chk_videos_attempts CHECK (attempts >= 0)
 );
 
-CREATE INDEX idx_videos_user_id ON videos(user_id);
-CREATE INDEX idx_videos_status ON videos(status);
-CREATE INDEX idx_videos_created_at ON videos(created_at DESC);
-CREATE INDEX idx_videos_user_status ON videos(user_id, status);
+CREATE INDEX idx_videos_user_status_created ON videos (user_id, status, created_at DESC);
 
-CREATE TABLE video_outputs (
+CREATE INDEX idx_videos_user_created ON videos (user_id, created_at DESC);
+
+COMMENT ON TABLE videos IS 'Videos enviados pelos usuarios e o estado do seu processamento';
+COMMENT ON COLUMN videos.user_id IS 'Claim sub do JWT; toda consulta e escopada por esta coluna';
+COMMENT ON COLUMN videos.storage_key IS 'Chave do video original: fiapx/inputs/{userId}/{videoId}/{originalFilename}';
+COMMENT ON COLUMN videos.zip_key IS 'Chave do ZIP de frames: fiapx/outputs/{userId}/{videoId}.zip';
+COMMENT ON COLUMN videos.status IS 'RECEIVED, QUEUED, PROCESSING, COMPLETED ou FAILED; os dois ultimos sao finais';
+COMMENT ON COLUMN videos.attempts IS 'Tentativas de processamento consumidas pelo worker antes da DLQ';
+COMMENT ON INDEX idx_videos_user_status_created IS 'Atende GET /videos com filtro de status';
+COMMENT ON INDEX idx_videos_user_created IS 'Atende GET /videos sem filtro de status';
+
+-- ---- V2__criar_tabela_outbox_events.sql ----
+CREATE TABLE outbox_events (
     id UUID PRIMARY KEY,
-    video_id UUID NOT NULL,
-    profile VARCHAR(50) NOT NULL,
-    bucket VARCHAR(100) NOT NULL,
-    object_key VARCHAR(500) NOT NULL,
-    size_bytes BIGINT NOT NULL,
-    width INTEGER,
-    height INTEGER,
-    content_type VARCHAR(100) NOT NULL,
+    aggregate_id UUID NOT NULL,
+    event_type VARCHAR(60) NOT NULL,
+    payload TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error VARCHAR(1000),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT fk_video_outputs_video FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE,
-    CONSTRAINT uk_video_outputs_profile UNIQUE (video_id, profile)
+    published_at TIMESTAMP,
+    CONSTRAINT chk_outbox_attempts CHECK (attempts >= 0)
 );
 
-CREATE INDEX idx_video_outputs_video_id ON video_outputs(video_id);
+CREATE INDEX idx_outbox_pendentes ON outbox_events (created_at)
+    WHERE published_at IS NULL;
 
-COMMENT ON TABLE videos IS 'Metadados de videos enviados para processamento';
-COMMENT ON COLUMN videos.id IS 'Identificador unico do video (UUID v4)';
-COMMENT ON COLUMN videos.user_id IS 'Usuario dono do video (claim sub do JWT, sem FK - outro database)';
-COMMENT ON COLUMN videos.filename IS 'Nome original do arquivo';
-COMMENT ON COLUMN videos.content_type IS 'MIME type do video original';
-COMMENT ON COLUMN videos.size_bytes IS 'Tamanho em bytes (max 5GB)';
-COMMENT ON COLUMN videos.status IS 'Estado do processamento: UPLOADED -> PROCESSING -> PROCESSED | FAILED';
-COMMENT ON COLUMN videos.duration_seconds IS 'Duracao em segundos (preenchido apos processado)';
-COMMENT ON COLUMN videos.width IS 'Largura em pixels';
-COMMENT ON COLUMN videos.height IS 'Altura em pixels';
-COMMENT ON COLUMN videos.bitrate_kbps IS 'Bitrate em kbps';
-COMMENT ON COLUMN videos.codec IS 'Codec de video (ex: h264, h265, vp9)';
-COMMENT ON COLUMN videos.thumbnail_url IS 'URL publica do thumbnail';
-COMMENT ON COLUMN videos.bucket IS 'Bucket (MinIO no local) onde o arquivo original esta';
-COMMENT ON COLUMN videos.object_key IS 'Chave do objeto no bucket';
-COMMENT ON COLUMN videos.checksum_sha256 IS 'SHA-256 do arquivo original para verificacao de integridade';
-COMMENT ON COLUMN videos.error_code IS 'Codigo de erro padronizado (ex: PROCESSING_TIMEOUT, INVALID_FORMAT)';
-COMMENT ON COLUMN videos.error_message IS 'Mensagem de erro detalhada';
-COMMENT ON COLUMN videos.retry_count IS 'Numero de tentativas de reprocessamento';
-COMMENT ON COLUMN videos.max_retries IS 'Maximo de tentativas permitidas';
-COMMENT ON COLUMN videos.created_at IS 'Data de criacao do registro (upload iniciado)';
-COMMENT ON COLUMN videos.updated_at IS 'Data da ultima atualizacao de status';
-COMMENT ON COLUMN videos.processed_at IS 'Data de conclusao do processamento (sucesso ou falha final)';
+CREATE INDEX idx_outbox_aggregate ON outbox_events (aggregate_id);
 
-COMMENT ON TABLE video_outputs IS 'Artefatos gerados no processamento. No fluxo do hackathon (frames -> zip) o profile e "zip", e o modelo tambem suporta transcodings/thumbnails.';
-COMMENT ON COLUMN video_outputs.profile IS 'Perfil de saida: zip (frames), original, 1080p, 720p, 480p, 360p, thumbnail';
-COMMENT ON COLUMN video_outputs.content_type IS 'MIME type do arquivo de saida';
+COMMENT ON TABLE outbox_events IS 'Eventos gravados na mesma transacao do agregado e publicados depois no RabbitMQ';
+COMMENT ON COLUMN outbox_events.aggregate_id IS 'Id do video que originou o evento';
+COMMENT ON COLUMN outbox_events.event_type IS 'Routing key do evento no exchange fiapx.video';
+COMMENT ON COLUMN outbox_events.payload IS 'Corpo JSON do evento, ja no formato do contrato';
+COMMENT ON COLUMN outbox_events.published_at IS 'Nulo enquanto o broker nao confirmou a publicacao';
+COMMENT ON INDEX idx_outbox_pendentes IS 'Indice parcial que o dispatcher varre a cada ciclo';
