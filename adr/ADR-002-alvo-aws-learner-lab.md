@@ -38,16 +38,24 @@ a solução:
 | Orquestração | kind | **EKS 1.31**, node group t3.large (2 a 4 nós) |
 | Registry | imagens `:local` | **ECR** |
 | Banco | Postgres no cluster | **RDS PostgreSQL 16** (`authdb`, `videodb`) |
-| Mensageria | RabbitMQ no cluster | **Amazon MQ for RabbitMQ 3.13** (AMQPS) |
+| Mensageria | RabbitMQ no cluster | **RabbitMQ no EKS** (StatefulSet, volume EBS gp3) — Amazon MQ negado pelo lab |
 | Cache | Redis no cluster | **ElastiCache Redis 7** |
-| Object storage | MinIO | **S3** |
+| Object storage | MinIO | **S3** (bucket criado pela CLI, não pelo Terraform) |
 | Rede | — | VPC em 2 AZs, subnets privadas, 1 NAT |
 | IaC | manifests + Kustomize | **Terraform** (`infra/terraform`), estado remoto em S3 |
 
-- **Amazon MQ em vez de SQS:** é RabbitMQ gerenciado, então video-service e
-  video-processor não mudam uma linha (exchange topic, quorum queues, DLX,
-  publisher confirms). SQS exigiria reescrever o outbox, o consumer de status e
-  a DLQ.
+- **RabbitMQ em vez de SQS:** video-service e video-processor não mudam uma
+  linha (exchange topic, quorum queues, DLX, publisher confirms). SQS exigiria
+  reescrever o outbox, o consumer de status e a DLQ.
+- **RabbitMQ no EKS, não no Amazon MQ (revisão 1.1):** o primeiro `apply` no
+  Learner Lab recebeu `AccessDenied` em `mq:CreateBroker`. Aplicado o plano B: o
+  mesmo StatefulSet da ADR-001, com volume EBS gp3 provisionado pelo addon
+  `aws-ebs-csi-driver` (o driver usa o `LabRole` do nó, porque o lab não permite
+  IRSA). As mensagens sobrevivem a restart do pod.
+- **Bucket da aplicação fora do Terraform (revisão 1.1):** o `aws_s3_bucket` do
+  provider AWS sempre lê a configuração de object lock, e um SCP do lab nega
+  `s3:GetBucketObjectLockConfiguration`. O bucket `fiapx-app-<conta>-<região>` é
+  criado e apagado pela CLI (`infra/scripts/aws-lib.sh`), como o bucket do estado.
 - **IAM:** cluster e nós usam o `LabRole`. Os pods acessam o S3 com as
   credenciais do nó pela cadeia padrão da AWS (IMDSv2, hop limit 2); não há
   chave fixa em lugar nenhum.
@@ -71,14 +79,14 @@ a solução:
 ### Negativas / Riscos
 - ❌ Sem OIDC, o deploy na AWS é manual (credenciais da sessão), não automático
   a cada merge. O CD automático continua validando no kind efêmero.
-- ❌ EKS + NAT + RDS + Amazon MQ custam por hora: esquecer o ambiente ligado
+- ❌ EKS + NAT + RDS + ElastiCache custam por hora: esquecer o ambiente ligado
   consome o crédito do lab.
-- ❌ Riscos do Learner Lab a confirmar no primeiro `apply`: disponibilidade do
-  Amazon MQ e quorum queues em broker single-instance. Plano B: RabbitMQ dentro
-  do EKS (manifests da ADR-001).
+- ❌ O RabbitMQ no cluster é mais um componente para operar (1 réplica, sem
+  cluster RabbitMQ): se o nó cair, a mensageria para até o pod voltar em outro
+  nó da mesma AZ do volume EBS. As mensagens persistidas não se perdem.
 
 ### Neutras / Trade-offs
-- ⚖️ Single-AZ para RDS, Amazon MQ e ElastiCache: suficiente para a demo, sem
+- ⚖️ Single-AZ para RDS, RabbitMQ e ElastiCache: suficiente para a demo, sem
   alta disponibilidade.
 - ⚖️ Um NAT só: metade do custo, com um ponto único de falha na saída para a
   internet.
@@ -99,7 +107,7 @@ a solução:
 ## Plano de Implementação
 
 1. [x] `terraform/bootstrap`: bucket do estado remoto.
-2. [x] `terraform/aws`: VPC, EKS, ECR, RDS, Amazon MQ, ElastiCache, S3.
+2. [x] `terraform/aws`: VPC, EKS (+ EBS CSI), ECR, RDS, ElastiCache; RabbitMQ no EKS e bucket S3 pela CLI (revisão 1.1).
 3. [x] Overlays `k8s/*/overlays/aws` + `scripts/aws-render.sh`.
 4. [x] `scripts/aws-up.sh` e `scripts/aws-down.sh`.
 5. [x] CI do Terraform com Floci.
@@ -141,3 +149,4 @@ a solução:
 | Data | Versão | Autor | Mudança |
 |---|---|---|---|
 | 2026-09-19 | 1.0 | @denisrodrigues | Criação: alvo AWS (EKS + serviços gerenciados), restrições do Learner Lab |
+| 2026-09-19 | 1.1 | @denisrodrigues | Plano B aplicado: RabbitMQ no EKS (Amazon MQ negado) e bucket S3 pela CLI (SCP nega leitura de object lock) |

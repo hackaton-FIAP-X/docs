@@ -10,7 +10,7 @@
 | Ambiente | Bucket | Região |
 |----------|--------|--------|
 | **Local (kind / compose)** | **`fiapx`** — prefixos `inputs/` e `outputs/` | — (MinIO) |
-| **AWS (Learner Lab)** | `fiapx-app-<conta>-<sufixo>` (criado pelo Terraform), mesmos prefixos | `us-east-1` (S3) — ver [ADR-002](../../adr/ADR-002-alvo-aws-learner-lab.md) |
+| **AWS (Learner Lab)** | `fiapx-app-<conta>-<região>` (criado pela CLI em `infra/scripts/aws-lib.sh`), mesmos prefixos | `us-east-1` (S3) — ver [ADR-002](../../adr/ADR-002-alvo-aws-learner-lab.md) |
 | Homologação *(não implementado)* | `oficina-videos-homolog` | `us-east-1` |
 | Produção *(não implementado)* | `oficina-videos-prod` | `us-east-1` |
 
