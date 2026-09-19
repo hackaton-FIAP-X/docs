@@ -1,0 +1,100 @@
+name: CI
+
+# PLT-5 — validacao dos contratos e do schema do banco.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    name: valida OpenAPI e eventos
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Lint dos specs OpenAPI
+        run: npx --yes @redocly/cli@1 lint contracts/openapi/*.yaml
+
+      - name: Eventos sao JSON valido e tem o envelope esperado
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, sys
+          envelope = {"event", "event_id", "event_version", "timestamp", "source", "data", "metadata"}
+          erros = []
+          arquivos = sorted(pathlib.Path("contracts/events").glob("*.json"))
+          if not arquivos:
+              sys.exit("nenhum evento encontrado em contracts/events/")
+          for f in arquivos:
+              try:
+                  doc = json.loads(f.read_text())
+              except json.JSONDecodeError as e:
+                  erros.append(f"{f}: JSON invalido -> {e}")
+                  continue
+              faltando = envelope - doc.keys()
+              if faltando:
+                  erros.append(f"{f}: faltam campos do envelope {sorted(faltando)}")
+              meta = doc.get("metadata", {})
+              if "correlation_id" not in meta:
+                  erros.append(f"{f}: metadata sem correlation_id")
+              print(f"ok  {f}  ({doc.get('event')})")
+          if erros:
+              print("\n".join(erros))
+              sys.exit(1)
+          PY
+
+  schema:
+    name: schema.sql roda em base vazia
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci
+          POSTGRES_USER: ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instala o psql
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
+
+      - name: Aplica database/schema.sql
+        env:
+          PGPASSWORD: ci
+        # ON_ERROR_STOP=1 faz o psql sair !=0 no primeiro erro de SQL.
+        run: psql -v ON_ERROR_STOP=1 -h localhost -U ci -d postgres -f database/schema.sql
+
+      - name: Confere as tabelas criadas
+        env:
+          PGPASSWORD: ci
+        run: |
+          echo "--- authdb ---"
+          psql -h localhost -U ci -d authdb -c '\dt'
+          echo "--- videodb ---"
+          psql -h localhost -U ci -d videodb -c '\dt'
+          # Falha se alguma tabela esperada faltar.
+          psql -v ON_ERROR_STOP=1 -h localhost -U ci -d authdb  -c "SELECT 1 FROM users LIMIT 0;"
+          psql -v ON_ERROR_STOP=1 -h localhost -U ci -d videodb -c "SELECT 1 FROM videos LIMIT 0;"
+          psql -v ON_ERROR_STOP=1 -h localhost -U ci -d videodb -c "SELECT 1 FROM outbox_events LIMIT 0;"

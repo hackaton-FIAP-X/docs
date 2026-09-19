@@ -16,6 +16,7 @@ Registro de decisões arquiteturais significativas do projeto.
 | ID | Título | Status | Data | Autor |
 |----|--------|--------|------|-------|
 | 001 | [Stack local do hackathon — kind + RabbitMQ + MinIO + PostgreSQL + Redis](ADR-001-stack-local-kind-rabbitmq-minio.md) | Aceito | 2026-09-01 | @denisrodrigues |
+| 002 | [Alvo de produção na AWS (Learner Lab) com Terraform](ADR-002-alvo-aws-learner-lab.md) | Aceito | 2026-09-19 | @denisrodrigues |
 
 > **Dica**: Mantenha esta tabela atualizada. Script sugerido para gerar automaticamente:
 > ```bash

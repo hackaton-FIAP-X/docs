@@ -172,7 +172,7 @@ components:
           example: 3600
         headers:
           type: object
-          description: Headers obrigatórios no PUT (ex: Content-Type)
+          description: "Headers obrigatórios no PUT (ex: Content-Type)"
           example:
             Content-Type: "video/mp4"
     VideoResponse:
