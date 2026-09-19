@@ -97,4 +97,4 @@ jobs:
           # Falha se alguma tabela esperada faltar.
           psql -v ON_ERROR_STOP=1 -h localhost -U ci -d authdb  -c "SELECT 1 FROM users LIMIT 0;"
           psql -v ON_ERROR_STOP=1 -h localhost -U ci -d videodb -c "SELECT 1 FROM videos LIMIT 0;"
-          psql -v ON_ERROR_STOP=1 -h localhost -U ci -d videodb -c "SELECT 1 FROM video_outputs LIMIT 0;"
+          psql -v ON_ERROR_STOP=1 -h localhost -U ci -d videodb -c "SELECT 1 FROM outbox_events LIMIT 0;"
