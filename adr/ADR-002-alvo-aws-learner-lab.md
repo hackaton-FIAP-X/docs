@@ -38,7 +38,7 @@ a solução:
 | Orquestração | kind | **EKS 1.31**, node group t3.large (2 a 4 nós) |
 | Registry | imagens `:local` | **ECR** |
 | Banco | Postgres no cluster | **RDS PostgreSQL 16** (`authdb`, `videodb`) |
-| Mensageria | RabbitMQ no cluster | **RabbitMQ no EKS** (StatefulSet, volume EBS gp3) — Amazon MQ negado pelo lab |
+| Mensageria | RabbitMQ no cluster | **RabbitMQ no EKS** (StatefulSet, disco efêmero) — Amazon MQ negado pelo lab |
 | Cache | Redis no cluster | **ElastiCache Redis 7** |
 | Object storage | MinIO | **S3** (bucket criado pela CLI, não pelo Terraform) |
 | Rede | — | VPC em 2 AZs, subnets privadas, 1 NAT |
@@ -49,9 +49,16 @@ a solução:
   reescrever o outbox, o consumer de status e a DLQ.
 - **RabbitMQ no EKS, não no Amazon MQ (revisão 1.1):** o primeiro `apply` no
   Learner Lab recebeu `AccessDenied` em `mq:CreateBroker`. Aplicado o plano B: o
-  mesmo StatefulSet da ADR-001, com volume EBS gp3 provisionado pelo addon
-  `aws-ebs-csi-driver` (o driver usa o `LabRole` do nó, porque o lab não permite
-  IRSA). As mensagens sobrevivem a restart do pod.
+  mesmo StatefulSet da ADR-001.
+- **Disco efêmero para o RabbitMQ (revisão 1.2):** o volume EBS foi tentado e
+  abandonado. Um disco EBS vive numa única AZ e prende o pod a um nó, que ficou
+  sem CPU (`Insufficient cpu` + `volume node affinity conflict`); e o `fsGroup`
+  aplicado ao volume devolvia permissão de grupo ao cookie do Erlang, que o
+  RabbitMQ recusa. Com `emptyDir`, **mensagem ainda em fila se perde se o pod
+  reiniciar**. O que já foi aceito não se perde: o video-service grava no banco
+  (outbox) antes de publicar e o video-processor só confirma a mensagem depois
+  de gravar o ZIP no S3. O driver EBS e a StorageClass gp3 continuam instalados,
+  caso se queira voltar a persistir.
 - **Bucket da aplicação fora do Terraform (revisão 1.1):** o `aws_s3_bucket` do
   provider AWS sempre lê a configuração de object lock, e um SCP do lab nega
   `s3:GetBucketObjectLockConfiguration`. O bucket `fiapx-app-<conta>-<região>` é
@@ -82,8 +89,9 @@ a solução:
 - ❌ EKS + NAT + RDS + ElastiCache custam por hora: esquecer o ambiente ligado
   consome o crédito do lab.
 - ❌ O RabbitMQ no cluster é mais um componente para operar (1 réplica, sem
-  cluster RabbitMQ): se o nó cair, a mensageria para até o pod voltar em outro
-  nó da mesma AZ do volume EBS. As mensagens persistidas não se perdem.
+  cluster RabbitMQ) e, com disco efêmero, um restart do pod descarta a fila.
+  Aceitável para a demo; num ambiente real seria EFS (multi-AZ), um cluster
+  RabbitMQ com réplicas, ou o Amazon MQ numa conta sem as restrições do lab.
 
 ### Neutras / Trade-offs
 - ⚖️ Single-AZ para RDS, RabbitMQ e ElastiCache: suficiente para a demo, sem
@@ -150,3 +158,4 @@ a solução:
 |---|---|---|---|
 | 2026-09-19 | 1.0 | @denisrodrigues | Criação: alvo AWS (EKS + serviços gerenciados), restrições do Learner Lab |
 | 2026-09-19 | 1.1 | @denisrodrigues | Plano B aplicado: RabbitMQ no EKS (Amazon MQ negado) e bucket S3 pela CLI (SCP nega leitura de object lock) |
+| 2026-09-20 | 1.2 | @denisrodrigues | RabbitMQ passa a disco efêmero: EBS prende o pod a uma AZ e quebra a permissão do cookie do Erlang |
